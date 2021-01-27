@@ -378,6 +378,8 @@ static void pl011_write(unsigned int val, const struct uart_amba_port *uap,
 static int pl011_fifo_to_tty(struct uart_amba_port *uap)
 {
 	unsigned int ch, flag, fifotaken;
+	int sysrq;
+	u16 status;
 
 	for (fifotaken = 0; fifotaken != 256; fifotaken++) {
 		smp_read_barrier_depends(); /* for rx_fifo_filled */
@@ -415,10 +417,12 @@ static int pl011_fifo_to_tty(struct uart_amba_port *uap)
 				flag = TTY_FRAME;
 		}
 
-		if (uart_handle_sysrq_char(&uap->port, ch & 255))
-			continue;
+		spin_unlock(&uap->port.lock);
+		sysrq = uart_handle_sysrq_char(&uap->port, ch & 255);
+		spin_lock(&uap->port.lock);
 
-		uart_insert_char(&uap->port, ch, UART011_DR_OE, ch, flag);
+		if (!sysrq)
+			uart_insert_char(&uap->port, ch, UART011_DR_OE, ch, flag);
 	}
 
 	return fifotaken;
@@ -2532,9 +2536,8 @@ pl011_console_write(struct console *co, const char *s, unsigned int count)
 	clk_disable(uap->clk);
 }
 
-static void
-pl011_console_get_options(struct uart_amba_port *uap, int *baud,
-			     int *parity, int *bits)
+static void pl011_console_get_options(struct uart_amba_port *uap, int *baud,
+				      int *parity, int *bits)
 {
 	if (pl011_read(uap, REG_CR) & UART01x_CR_UARTEN) {
 		unsigned int lcr_h, ibrd, fbrd;
@@ -2636,7 +2639,7 @@ static int pl011_console_setup(struct console *co, char *options)
  *	Returns 0 if console matches; otherwise non-zero to use default matching
  */
 static int pl011_console_match(struct console *co, char *name, int idx,
-				      char *options)
+			       char *options)
 {
 	unsigned char iotype;
 	resource_size_t addr;
@@ -2873,6 +2876,7 @@ static int pl011_setup_port(struct device *dev, struct uart_amba_port *uap,
 	uap->port.fifosize = uap->fifosize;
 	uap->port.flags = UPF_BOOT_AUTOCONF;
 	uap->port.line = index;
+	spin_lock_init(&uap->port.lock);
 
 	ret = uart_get_rs485_mode(&uap->port);
 	if (ret)

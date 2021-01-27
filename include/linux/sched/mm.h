@@ -49,16 +49,7 @@ static inline void mmdrop(struct mm_struct *mm)
 		__mmdrop(mm);
 }
 
-#ifdef CONFIG_PREEMPT_RT_BASE
-extern void __mmdrop_delayed(struct rcu_head *rhp);
-static inline void mmdrop_delayed(struct mm_struct *mm)
-{
-	if (atomic_dec_and_test(&mm->mm_count))
-		call_rcu(&mm->delayed_drop, __mmdrop_delayed);
-}
-#else
-# define mmdrop_delayed(mm)	mmdrop(mm)
-#endif
+void mmdrop(struct mm_struct *mm);
 
 /*
  * This has to be called after a get_task_mm()/mmget_not_zero()
